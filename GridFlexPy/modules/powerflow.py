@@ -12,7 +12,8 @@ output_img = os.getcwd() + '/data/output/img/'
 path_generators = os.getcwd() + '/data/generators_profiles/'
 path_forecast = os.getcwd() + '/data/forecasts'
 
-
+# As funções abaixo executam o power flow no OpenDSS, com ou sem a operação do BESS. O ponto chave é garantir que o run chame ela com os parâmetros corretos para 
+# garantir o funcionamento correto do framework.
 def power_flow_bess(timestep,opendssmodel,batteries,generators,loads,light_list,dss):
 
     #Clean the prompt comand of the OpenDSS

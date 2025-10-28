@@ -1,6 +1,8 @@
 from modules import *
 import os
 
+## Nesse main é definido os diretórios, modo de operação, e dados necessários para rodar a simulação de fluxo de potência com BESS.
+## No final é salvo os resultados em arquivos csv.
 
 # Input and output paths    
 path_xlsx = os.getcwd() + '/data/spreadsheets/'; os.makedirs(path_xlsx,exist_ok=True)
@@ -14,7 +16,7 @@ if __name__ == '__main__':
     config ={
         'name_spreadsheet': 'sheet_IEEE13Node.xlsx',
         'name_dss': 'CondominioDosIpes.dss',
-        'kind': 'Smoothing',  # Options: 'NoOperation', 'Simple', 'Smoothing', 'Forecasting'
+        'kind': 'Smoothing',  # Options: 'NoOperation', 'Simple', 'Smoothing', 'Forecasting', "RLForecasting"
         'bess_bus': 'bus_013',
         'seq_len': 162,  # Tamanho da janela de entrada
         'past_values': 3,  # Past values to start operation in 'Smoothing' or 'Simple' mode
