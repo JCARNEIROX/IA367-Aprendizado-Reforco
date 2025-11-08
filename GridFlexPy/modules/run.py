@@ -113,6 +113,7 @@ def run(config:dict):
                 
                 demand_values = [d[1] for d in demanddf_list[i-config['past_values']:i]] 
                 demand_values.append(next_demand[0])
+                
 
                 # Update bess power
                 operate_bess(config['kind'],i,interval,demand_values,bess_list)
@@ -120,6 +121,7 @@ def run(config:dict):
                 # Run the power flow with the operation of the BESS
                 load,generation,bess,demand_df,losses,bus_power,bus_voltage,branch_df = power_flow_bess(timestep,file_dss,bess_list,generators_list,loads_list,lights_list,dss)
 
+                
                 # Append the new lines
                 bus_power_list.extend(bus_power)
                 loaddf_list.append(load)
