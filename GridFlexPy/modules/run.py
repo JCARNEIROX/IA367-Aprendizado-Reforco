@@ -1,4 +1,3 @@
-# Aqui é onde eu trato os dados de entrada, configuro o modo de operação e rodo a simulação de fluxo de potência com ou sem BES operando.
 # # Import all modules to run the simulation
 from modules import read_file_xlsx
 from modules import get_informations
@@ -32,7 +31,7 @@ path_forecast = os.getcwd() + '/data/forecasts/'
 
 def run(config:dict):
         
-    # Lê o arquivo excel com as informações do sistema, conexão das cargas, potência dos geradores, baterias, FP e etc.
+    # Read the file and
     file_contents = read_file_xlsx(path_xlsx+config['name_spreadsheet'])
 
     # Get the content of each page of the spreadsheet
@@ -42,7 +41,7 @@ def run(config:dict):
     loads = file_contents['Loads']
     public_ilumination = file_contents['Public_Ilumination']
 
-    # Aqui alem de pegar as informações gerais do sistema, eu construo os objetos de baterias, geradores, cargas e iluminação pública
+    # Get the general informations
     general_informations = get_informations(general_informations)
     bess_list = construct_bess(batteries)
     generators_list = construct_generators(generators)
@@ -50,28 +49,21 @@ def run(config:dict):
     lights_list = construct_lights(public_ilumination)
     
 
-    #Extraio as informações necessárias para rodar o power flow
+    #Run the power flow
     file_dss = path_dss + config['name_dss'] 
     date_ini = general_informations.start_date
     date_end = general_informations.end_date
     interval = general_informations.timestep
 
-    # Crio Listas para depois transformar em dataframes com os resultados,
-    # Essas listas podem até tirar pois não irá ser necessária para o nosso problema, e pode gastar tempo de processamento
+    # Create empty arrays to store the new lines to be added to dataframes
     bus_power_list = []
-    branch_df_list = []
-    voltage_df_list = []
-    # Guardaria só essas
-    bess_power_list = []
     loaddf_list = []
     generationdf_list = []
-    demanddf_list = [] # Essa é a demanda que estamos tentando suavizar
+    demanddf_list = []
     lossesdf_list = []
-    
-    # A ideia aqui seria armazenar também os dados de recompensa, loss, indíces de suavização e outros dados do modelo RL
-    # reward_list = []
-    # loss_list = []
-    # etc. 
+    branch_df_list = []
+    voltage_df_list = []
+    bess_power_list = []
 
     # Time range to iterate
     time_range = pd.date_range(date_ini, date_end, freq=f"{interval}T").to_list()
@@ -101,8 +93,7 @@ def run(config:dict):
         # Start the counter to mensure the time of execution
         start = t.time()
         for i,timestep in enumerate(time_range):
-            
-            # Se atingo o tamanho da sequência para predição, rodo o modelo LSTM para prever a demanda futura
+
             if (i>config['seq_len']-1) and (config['kind'] == 'Forecasting'):
                 load_vals = np.array([float(row[1]) for row in loaddf_list])
                 loss_vals = np.array([float(row[1]) for row in lossesdf_list])
@@ -113,7 +104,6 @@ def run(config:dict):
                 
                 demand_values = [d[1] for d in demanddf_list[i-config['past_values']:i]] 
                 demand_values.append(next_demand[0])
-                
 
                 # Update bess power
                 operate_bess(config['kind'],i,interval,demand_values,bess_list)
@@ -121,7 +111,6 @@ def run(config:dict):
                 # Run the power flow with the operation of the BESS
                 load,generation,bess,demand_df,losses,bus_power,bus_voltage,branch_df = power_flow_bess(timestep,file_dss,bess_list,generators_list,loads_list,lights_list,dss)
 
-                
                 # Append the new lines
                 bus_power_list.extend(bus_power)
                 loaddf_list.append(load)
@@ -133,10 +122,9 @@ def run(config:dict):
                 bess_power_list.extend(bess)
 
                 print(demanddf_list[i])
-            
-            # Se não rodo o power flow sem operação do BESS, isso é necessário para encher a lista até o tamanho da sequência de previsão da LSTM
             else:
 
+                # Run the power flow without the operation of the BESS
                 load,generation,bess,demand_df,losses,bus_power,bus_voltage,branch_df = power_flow_bess(timestep,file_dss,bess_list,generators_list,loads_list,lights_list,dss)
 
                 # Append the new lines
@@ -173,7 +161,6 @@ def run(config:dict):
 
         return bus_power_df1,load_df1,generation_df1,demand_df1,losses_df1,branch_df1,voltage_df1,bess_power_df,time_range
     
-    # Segue a mesma ideia para os outros modos de operação, com algumas modificações de cada..
     elif (config['kind'] == 'Smoothing') or (config['kind'] == 'Simple'):
         
         #Load the file of flux smoothing
@@ -252,7 +239,6 @@ def run(config:dict):
 
         return bus_power_df1,load_df1,generation_df1,demand_df1,losses_df1,branch_df1,voltage_df1,bess_power_df,time_range
     
-    # Se não for nenhum dos modos acima, rodo o power flow sem a operação do BESS
     else:
         print('Power Flow Simulation Started')
         # Start the counter to mensure the time of execution

@@ -142,13 +142,8 @@ def operate_bess(kind, i, interval, demand_prev,bess_list):
             bess.update_soc(soc)
             bess.update_state(state)
 
-    # Teria que adicionar uma condição para o RLForecasting aqui
-    # elif kind == "RLForecasting":
-    #...
-
 ##------------------------------------------------------------Functions to Operate Bess-----------------------------------------###
-## Essas funções eram meu "agente", basicamente elas definiam a operação do BESS e já colocava o valor de saída dentro dos limites 
-# de operação e energia no instante seguinte.
+
 # Power smoothing Function
 def smoothing_operation(i, timestep, demand, sigma, bess_object):
 
@@ -335,35 +330,94 @@ def forecast_operation(i,timestep, demand, sigma, bess_object):
                 return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), Bess_E_seg,state]
             
 
-## Deixo aqui uma função que calcula os indíces de suavização, caso queira usar futuramente
-def smoothing_indices(demand, bess_power, timestep):
-    """
-    Function to calculate smoothing indices based on demand and BESS power.
-    Returns the smoothing index values.
-    """
-    demand_array = np.array(demand)
-    bess_power_array = np.array([power for _,_,power,_,_,_ in bess_power])
+def kalman_operation(i,timestep, demand, sigma, bess_object):
 
-    # Calculate the smoothed demand
-    smoothed_demand = demand_array + bess_power_array
+    # Values of demand
+    if (i>161):
 
-    # Calculate the smoothing indices
-    original_variance = np.var(demand_array)
-    smoothed_variance = np.var(smoothed_demand)
+        # Pegue os valores reais
+        real_values = demand[:-1]
+        prediction = demand[-1]  # previsão da LSTM
 
-    smoothing_index = (original_variance - smoothed_variance) / original_variance if original_variance != 0 else 0
+        kf = KalmanFilter(dim_x=1, dim_z=1)
+        kf.x = np.array([[real_values[-1]]])
+        kf.F = np.array([[1]])
+        kf.H = np.array([[1]])
+        kf.P *= 1000.
+        kf.R = 0.1
+        kf.Q = 0.01
 
-    return smoothing_index
+        # Alimente o filtro com valores reais
+        for z in real_values:
+            kf.predict()
+            kf.update(z)
+
+        # Agora use a previsão LSTM como o próximo passo de atualização
+        kf.predict()
+        kf.update(prediction)
+
+        kalman_filtered_demand = float(kf.x)
+        PBessSeg = prediction - kalman_filtered_demand
+
+    else:
+        actual_demand = demand[-1]
+        
+        # # Gauss calculus
+        vec_gauss = demand  # Vector for Gaussian filter
+
+        # get the past 6 values and next 6 values in demand starting from i
+        # vec_gauss = demand[i-6:i+6]  # Vector for Gaussian filter
+        gauss_value = gaussian_filter1d(vec_gauss, sigma=sigma, radius=11)[-1]  # Value used to define BESS power
+
+        # Define the next BESS power based on actual demand and Gaussian value
+        PBessSeg = (actual_demand - gauss_value)
 
 
-# Calcula o indice de suavização da curva de demanda
-def smoothness_index(demand_series):
-    #Calcula as derivadas da curva de demanda
-    df_dt = np.gradient(demand_series)
-    df2_dt2 = np.gradient(df_dt)
-    #Calcula os indices de suavização
-    smoothens_std = round(np.std(df_dt,ddof=1),4)
-    norm_smoothness = round(np.sum(df2_dt2**2),4)
+    # Actual state of charge of battery
+    Soc = bess_object.SOC
 
-    return smoothens_std, norm_smoothness
-      
+    if PBessSeg > 0:  # Bateria vai descarregar
+        state = 'DISCHARGING'
+        if PBessSeg > bess_object.Pmax:  # Potência seguinte maior que a máxima
+            Pseg = bess_object.Pmax
+            Bess_E_seg = bess_object.Et - Pseg * (timestep / 60) * (1 / bess_object.Efficiency)  # Energia da bateria no instante seguinte
+
+            if Bess_E_seg < bess_object.Emin:  # Energia seguinte menor que a mínima permitida
+                Pseg = (bess_object.Et - bess_object.Emin) / (timestep / 60)  # Descarregar para atingir no máximo a capacidade mínima
+                return [Pseg, Soc - (Pseg * (timestep / 60) * (1 / bess_object.Efficiency) / bess_object.Cmax), bess_object.Emin,state]
+        
+            else:  # Descarrega com a potência máxima e a energia seguinte é a calculada
+                return [Pseg, Soc - (Pseg * (timestep / 60) * (1 / bess_object.Efficiency) / bess_object.Cmax), Bess_E_seg,state]
+        else:
+            Pseg = PBessSeg
+            Bess_E_seg = bess_object.Et - Pseg * (timestep / 60) * (1 / bess_object.Efficiency)  # Energia da bateria no instante seguinte
+
+            if Bess_E_seg < bess_object.Emin:  # Energia seguinte menor que a mínima permitida
+                Pseg = (bess_object.Et - bess_object.Emin) / (timestep / 60)  # Descarregar para atingir no máximo a capacidade mínima
+                return [Pseg, Soc - (Pseg * (timestep / 60) * (1 / bess_object.Efficiency) / bess_object.Cmax), bess_object.Emin,state]
+        
+            else:  # Descarrega com a potência máxima e a energia seguinte é a calculada
+                return [Pseg, Soc - (Pseg * (timestep / 60) * (1 / bess_object.Efficiency) / bess_object.Cmax), Bess_E_seg,state]
+
+    else:  # Bateria vai carregar
+        state = 'CHARGING'
+        if PBessSeg < -bess_object.Pmax:  # Potência seguinte maior que a máxima
+            Pseg = bess_object.Pmax
+            Bess_E_seg = bess_object.Et + Pseg * (timestep / 60) * bess_object.Efficiency  # Energia da bateria no instante seguinte
+
+            if Bess_E_seg > bess_object.Emax:  # Energia seguinte maior que a máxima permitida
+                Pseg = (bess_object.Emax - bess_object.Et) / (timestep / 60)  # Carregar para atingir no máximo a capacidade mínima
+                return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), bess_object.Emax,state]
+            
+            else:  # Carrega com a potência máxima
+                return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), Bess_E_seg,state]
+        else:
+            Pseg = -PBessSeg
+            Bess_E_seg = bess_object.Et + Pseg * (timestep / 60) * bess_object.Efficiency  # Energia da bateria no instante seguinte
+
+            if Bess_E_seg > bess_object.Emax:  # Energia seguinte maior que a máxima permitida
+                Pseg = (bess_object.Emax - bess_object.Et) / (timestep / 60)  # Carregar para atingir no máximo a capacidade mínima
+                return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), bess_object.Emax,state]
+            
+            else:  # Carrega com a potência máxima
+                return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), Bess_E_seg,state]

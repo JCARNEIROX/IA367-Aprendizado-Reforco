@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import gym
 
  # Use cuda if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
