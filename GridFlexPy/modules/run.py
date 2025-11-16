@@ -21,12 +21,12 @@ warnings.filterwarnings("ignore")
 
 
 # Input and output paths    
-path_xlsx = os.getcwd() + '/data/spreadsheets/'
-path_dss = os.getcwd() + '/data/dss_files/'	
-output_csv = os.getcwd() + '/data/output/csv/'
-output_img = os.getcwd() + '/data/output/img/'
-path_generators = os.getcwd() + '/data/generators_profiles/'
-path_forecast = os.getcwd() + '/data/forecasts/'
+path_xlsx = os.getcwd() + '/GridFlexPy/data/spreadsheets/'
+path_dss = os.getcwd() + 'GridFlexPy/data/dss_files/'	
+output_csv = os.getcwd() + 'GridFlexPy/data/output/csv/'
+output_img = os.getcwd() + 'GridFlexPy/data/output/img/'
+path_generators = os.getcwd() + 'GridFlexPy/data/generators_profiles/'
+path_forecast = os.getcwd() + 'GridFlexPy/data/forecasts/'
 
 
 def run(config:dict):

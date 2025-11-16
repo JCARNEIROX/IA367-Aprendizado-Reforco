@@ -7,7 +7,7 @@ path_dss = os.getcwd() + '/data/dss_files/'
 output_csv = os.getcwd() + '/data/output/csv/'
 output_img = os.getcwd() + '/data/output/img/'
 path_generators = os.getcwd() + '/data/generators_profiles/'
-path_forecast = os.getcwd() + '/data/forecasts'
+path_forecast = os.getcwd() + '/data/forecasts/'
 
 
 def add_gd(Generator):

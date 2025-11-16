@@ -3,12 +3,12 @@ import numpy as np
 import os
 
 # Input and output paths    
-path_xlsx = os.getcwd() + '/data/spreadsheets/'
-path_dss = os.getcwd() + '/data/dss_files/'	
-output_csv = os.getcwd() + '/data/output/csv/'
-output_img = os.getcwd() + '/data/output/img/'
-path_generators = os.getcwd() + '/data/generators_profiles/'
-path_forecast = os.getcwd() + '/data/forecasts'
+path_xlsx = os.getcwd() + '/GridFlexPy/data/spreadsheets/'
+path_dss = os.getcwd() + '/GridFlexPy/data/dss_files/'	
+output_csv = os.getcwd() + '/GridFlexPy/data/output/csv/'
+output_img = os.getcwd() + '/GridFlexPy/data/output/img/'
+path_generators = os.getcwd() + '/GridFlexPy/data/generators_profiles/'
+path_forecast = os.getcwd() + '/GridFlexPy/data/forecasts'
 
 def add_bat(Bess):
     """	
@@ -329,95 +329,12 @@ def forecast_operation(i,timestep, demand, sigma, bess_object):
             else:  # Carrega com a potência máxima
                 return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), Bess_E_seg,state]
             
+def smoothness_index(demand_series):
+    #Calcula as derivadas da curva de demanda
+    df_dt = np.gradient(demand_series)
+    df2_dt2 = np.gradient(df_dt)
+    #Calcula os indices de suavização
+    smoothens_std = round(np.std(df_dt,ddof=1),4)
+    norm_smoothness = round(np.sum(df2_dt2**2),4)
 
-def kalman_operation(i,timestep, demand, sigma, bess_object):
-
-    # Values of demand
-    if (i>161):
-
-        # Pegue os valores reais
-        real_values = demand[:-1]
-        prediction = demand[-1]  # previsão da LSTM
-
-        kf = KalmanFilter(dim_x=1, dim_z=1)
-        kf.x = np.array([[real_values[-1]]])
-        kf.F = np.array([[1]])
-        kf.H = np.array([[1]])
-        kf.P *= 1000.
-        kf.R = 0.1
-        kf.Q = 0.01
-
-        # Alimente o filtro com valores reais
-        for z in real_values:
-            kf.predict()
-            kf.update(z)
-
-        # Agora use a previsão LSTM como o próximo passo de atualização
-        kf.predict()
-        kf.update(prediction)
-
-        kalman_filtered_demand = float(kf.x)
-        PBessSeg = prediction - kalman_filtered_demand
-
-    else:
-        actual_demand = demand[-1]
-        
-        # # Gauss calculus
-        vec_gauss = demand  # Vector for Gaussian filter
-
-        # get the past 6 values and next 6 values in demand starting from i
-        # vec_gauss = demand[i-6:i+6]  # Vector for Gaussian filter
-        gauss_value = gaussian_filter1d(vec_gauss, sigma=sigma, radius=11)[-1]  # Value used to define BESS power
-
-        # Define the next BESS power based on actual demand and Gaussian value
-        PBessSeg = (actual_demand - gauss_value)
-
-
-    # Actual state of charge of battery
-    Soc = bess_object.SOC
-
-    if PBessSeg > 0:  # Bateria vai descarregar
-        state = 'DISCHARGING'
-        if PBessSeg > bess_object.Pmax:  # Potência seguinte maior que a máxima
-            Pseg = bess_object.Pmax
-            Bess_E_seg = bess_object.Et - Pseg * (timestep / 60) * (1 / bess_object.Efficiency)  # Energia da bateria no instante seguinte
-
-            if Bess_E_seg < bess_object.Emin:  # Energia seguinte menor que a mínima permitida
-                Pseg = (bess_object.Et - bess_object.Emin) / (timestep / 60)  # Descarregar para atingir no máximo a capacidade mínima
-                return [Pseg, Soc - (Pseg * (timestep / 60) * (1 / bess_object.Efficiency) / bess_object.Cmax), bess_object.Emin,state]
-        
-            else:  # Descarrega com a potência máxima e a energia seguinte é a calculada
-                return [Pseg, Soc - (Pseg * (timestep / 60) * (1 / bess_object.Efficiency) / bess_object.Cmax), Bess_E_seg,state]
-        else:
-            Pseg = PBessSeg
-            Bess_E_seg = bess_object.Et - Pseg * (timestep / 60) * (1 / bess_object.Efficiency)  # Energia da bateria no instante seguinte
-
-            if Bess_E_seg < bess_object.Emin:  # Energia seguinte menor que a mínima permitida
-                Pseg = (bess_object.Et - bess_object.Emin) / (timestep / 60)  # Descarregar para atingir no máximo a capacidade mínima
-                return [Pseg, Soc - (Pseg * (timestep / 60) * (1 / bess_object.Efficiency) / bess_object.Cmax), bess_object.Emin,state]
-        
-            else:  # Descarrega com a potência máxima e a energia seguinte é a calculada
-                return [Pseg, Soc - (Pseg * (timestep / 60) * (1 / bess_object.Efficiency) / bess_object.Cmax), Bess_E_seg,state]
-
-    else:  # Bateria vai carregar
-        state = 'CHARGING'
-        if PBessSeg < -bess_object.Pmax:  # Potência seguinte maior que a máxima
-            Pseg = bess_object.Pmax
-            Bess_E_seg = bess_object.Et + Pseg * (timestep / 60) * bess_object.Efficiency  # Energia da bateria no instante seguinte
-
-            if Bess_E_seg > bess_object.Emax:  # Energia seguinte maior que a máxima permitida
-                Pseg = (bess_object.Emax - bess_object.Et) / (timestep / 60)  # Carregar para atingir no máximo a capacidade mínima
-                return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), bess_object.Emax,state]
-            
-            else:  # Carrega com a potência máxima
-                return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), Bess_E_seg,state]
-        else:
-            Pseg = -PBessSeg
-            Bess_E_seg = bess_object.Et + Pseg * (timestep / 60) * bess_object.Efficiency  # Energia da bateria no instante seguinte
-
-            if Bess_E_seg > bess_object.Emax:  # Energia seguinte maior que a máxima permitida
-                Pseg = (bess_object.Emax - bess_object.Et) / (timestep / 60)  # Carregar para atingir no máximo a capacidade mínima
-                return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), bess_object.Emax,state]
-            
-            else:  # Carrega com a potência máxima
-                return [-Pseg, Soc + (Pseg * (timestep / 60) * bess_object.Efficiency / bess_object.Cmax), Bess_E_seg,state]
+    return smoothens_std,norm_smoothness

@@ -99,11 +99,26 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         self.general_info = get_informations(self._general_df)
         self.file_dss = str(self.path_dss / self.config["name_dss"])
 
+        # --- NOVO: permite sobrescrever start/end pelo config ---
+        base_start = self.general_info.start_date
+        base_end = self.general_info.end_date
+
+        start_override = self.config.get("start_date", None)
+        end_override = self.config.get("end_date", None)
+
+        if start_override is not None:
+            base_start = pd.to_datetime(start_override)
+
+        if end_override is not None:
+            base_end = pd.to_datetime(end_override)
+
         self.time_range = pd.date_range(
-            self.general_info.start_date,
-            self.general_info.end_date,
+            base_start,
+            base_end,
             freq=f"{self.general_info.timestep}T",
         ).to_list()
+        # --------------------------------------------------------
+
         if len(self.time_range) == 0:
             raise ValueError("Time range is empty. Please check the spreadsheet dates.")
 
@@ -162,6 +177,9 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         self.bess_power_history: List[Sequence[float]] = []
         self.reward_trace: List[RewardBreakdown] = []
         self.action_trace: List[np.ndarray] = []
+        self.sigma_history: List[float] = []
+        self.norm_history: List[float] = []
+        self.timestep_history: List[pd.Timestamp] = []
 
         self.latest_sigma = 0.0
         self.latest_norm = 0.0
@@ -318,6 +336,10 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         self.bus_voltage_history.clear()
         self.branch_history.clear()
         self.bess_power_history.clear()
+        # limpa histórico de índices
+        self.sigma_history.clear()
+        self.norm_history.clear()
+        self.timestep_history.clear()
 
     def _prime_history(self) -> None:
         warmup_actions = np.zeros(self.num_bess, dtype=np.float32)
@@ -375,29 +397,83 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         return applied
 
     def _apply_single_bess_action(self, bess: Bess, power_kw: float) -> float:
-        dt = self.dt_hours
-        efficiency = max(bess.Efficiency, 1e-6)
+        """
+        Aplica a ação em uma única bateria usando a lógica legada do framework.
 
-        power_kw = float(np.clip(power_kw, -bess.Pmax, bess.Pmax))
+        Parameters
+        ----------
+        bess : Bess
+            Objeto da bateria.
+        power_kw : float
+            Potência pedida pelo agente (kW). Positiva = descarregar, negativa = carregar.
 
-        if power_kw >= 0:
-            max_energy_kw = (bess.Et - bess.Emin) * efficiency / dt
-            available_kw = max(0.0, min(bess.Pmax, max_energy_kw))
-            applied_kw = min(power_kw, available_kw)
-            delta_e = (applied_kw * dt) / efficiency
-            bess.Et = max(bess.Emin, bess.Et - delta_e)
-            bess.state = "DISCHARGING" if applied_kw > 0 else "IDLING"
-        else:
-            max_energy_kw = (bess.Emax - bess.Et) / (dt * efficiency)
-            available_kw = max(0.0, min(bess.Pmax, max_energy_kw))
-            applied_kw = -min(available_kw, abs(power_kw))
-            delta_e = (-applied_kw) * dt * efficiency
-            bess.Et = min(bess.Emax, bess.Et + delta_e)
-            bess.state = "CHARGING" if applied_kw < 0 else "IDLING"
+        Returns
+        -------
+        float
+            Potência realmente aplicada (kW) na bateria.
+        """
 
-        bess.Pt = applied_kw
-        bess.SOC = float(np.clip(bess.Et / bess.Cmax, 0.0, 1.0))
-        return applied_kw
+        # Mapeamento direto com o seu código
+        PBessSeg = float(power_kw)        # potência "seguinte" pedida (kW)
+        timestep = self.interval_minutes  # em minutos (mesma ideia do seu código)
+
+        Soc = bess.SOC
+        Et = bess.Et
+
+        # Proteção básica (opcional, já há clipping em _prepare_action)
+        PBessSeg = np.clip(PBessSeg, -bess.Pmax, bess.Pmax)
+
+        if PBessSeg > 0:  # Bateria vai descarregar
+            state = "DISCHARGING"
+
+            # Limita pela potência máxima
+            if PBessSeg > bess.Pmax:
+                Pseg = bess.Pmax
+            else:
+                Pseg = PBessSeg
+
+            # Energia no instante seguinte (descarga perde eficiência)
+            Bess_E_seg = Et - Pseg * (timestep / 60.0) * (1.0 / bess.Efficiency)
+
+            if Bess_E_seg < bess.Emin:
+                # Ajusta potência para não passar abaixo de Emin
+                Pseg = (Et - bess.Emin) / (timestep / 60.0)
+                Bess_E_seg = bess.Emin
+
+            # SOC seguinte
+            Soc_next = Soc - (Pseg * (timestep / 60.0) * (1.0 / bess.Efficiency) / bess.Cmax)
+
+            applied_kw = Pseg  # descarregando → potência aplicada é positiva
+
+        else:  # Bateria vai carregar
+            state = "CHARGING"
+
+            # Na sua lógica, Pseg é a magnitude positiva da potência de carga
+            if PBessSeg < -bess.Pmax:
+                Pseg = bess.Pmax
+            else:
+                Pseg = -PBessSeg  # PBessSeg é negativo, então -PBessSeg > 0
+
+            # Energia no instante seguinte (carga ganha energia com eficiência)
+            Bess_E_seg = Et + Pseg * (timestep / 60.0) * bess.Efficiency
+
+            if Bess_E_seg > bess.Emax:
+                # Ajusta potência para não passar acima de Emax
+                Pseg = (bess.Emax - Et) / (timestep / 60.0)
+                Bess_E_seg = bess.Emax
+
+            # SOC seguinte
+            Soc_next = Soc + (Pseg * (timestep / 60.0) * bess.Efficiency / bess.Cmax)
+
+            applied_kw = -Pseg  # carregando → potência aplicada é negativa
+
+        # --------- Atualiza o objeto Bess (mantendo a interface do env) --------- #
+        bess.Et = float(np.clip(Bess_E_seg, bess.Emin, bess.Emax))
+        bess.SOC = float(np.clip(Soc_next, 0.0, 1.0))
+        bess.Pt = float(applied_kw)
+        bess.state = state if abs(applied_kw) > 0 else "IDLING"
+
+        return float(applied_kw)
 
     def _log_step_results(
         self,
@@ -426,6 +502,13 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         else:
             self.latest_sigma = 0.0
             self.latest_norm = 0.0
+
+        current_ts = self.time_range[self.current_idx]
+
+        self.timestep_history.append(current_ts)
+        self.sigma_history.append(self.latest_sigma)
+        self.norm_history.append(self.latest_norm)
+        
 
     def _soc_array(self) -> np.ndarray:
         return np.array([bess.SOC for bess in self.bess_list], dtype=np.float32)
@@ -469,3 +552,13 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         self.prev_sigma = self.latest_sigma
         self.prev_norm = self.latest_norm
         return reward, breakdown
+
+    def indices_results(self) -> pd.DataFrame:
+        """Retorna um DataFrame com o histórico de sigma/norm ao longo do episódio."""
+        return pd.DataFrame(
+            {
+                "Timestep": self.timestep_history,
+                "Sigma": self.sigma_history,
+                "Norm": self.norm_history,
+            }
+        )
