@@ -303,10 +303,12 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         timestep = self.time_range[self.current_idx - 1]
         demand_kw = self.demand_history[-1][1]
         soc = ", ".join(f"{val:.3f}" for val in self._soc_array())
+        Pbess = self.bess_power_history[-1][2]
+        action = self.action_trace[-1][0]
         print(
             f"[{timestep}] Demand={demand_kw:.2f} kW "
+            f"Action {action:.2f} PBESS={Pbess:.2f} kW "
             f"Sigma={self.latest_sigma:.4f} Norm={self.latest_norm:.4f} "
-            f"SOC=[{soc}]"
         )
 
     # --------------------------------------------------------------------- #

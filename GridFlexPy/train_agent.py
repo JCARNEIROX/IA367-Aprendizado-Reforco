@@ -47,10 +47,10 @@ if __name__ == "__main__":
     ######## ----------------------- Parâmetros ------------------- ################
     # Dados completos (os mesmos da planilha)
     reward_weights = {"delta_sigma": 1000.0, "delta_norm": 1000.0, "soc": 1000.0}
-    full_start = pd.Timestamp("2012-07-07 06:00")
-    full_end = pd.Timestamp("2012-07-09 06:00")
+    full_start = pd.Timestamp("2012-07-06 12:00")
+    full_end = pd.Timestamp("2012-07-10 06:00")
     dt_minutes = 5
-    split_test = 0.5  # 50% para teste
+    split_test = 0.7  # 50% para teste
 
     full_range = pd.date_range(full_start, full_end, freq=f"{dt_minutes}T")
     n_total = len(full_range)
@@ -89,24 +89,7 @@ if __name__ == "__main__":
     model.learn(total_timesteps=steps_por_episodio, callback=callback)  #
     # Salvando o modelo e os índices
     print("Salvando o modelo treinado...")
-    indices_df = env_train.indices_results()
-    indices_df.to_csv(os.path.join(dir_model, "indices_train.csv"), index=False)
     model.save(os.path.join(dir_model, "ppo_gridflex"))
-    ## Salvando os dados de treino em arquivos CSV
-    results = env_train.episode_results()
-    rewards = pd.DataFrame([r.as_dict for r in env_test.reward_trace])
-    results["demand"].to_csv(
-        os.path.join(output_csv + "demand/", "rl_forecasting_results_train.csv"),
-        index=False,
-    )
-    results["bess"].to_csv(
-        os.path.join(output_csv + "bess/", "rl_forecasting_bess_power_train.csv"),
-        index=False,
-    )
-    rewards.to_csv(
-        os.path.join(dir_model, "rl_forecasting_rewards_train.csv"), index=False
-    )
-    env_train.close()
 
     ######## ----------------------- Teste ------------------- ################
 
