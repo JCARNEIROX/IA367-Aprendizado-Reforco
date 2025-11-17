@@ -23,18 +23,6 @@ dir_model = os.getcwd() + "/data/output/models/"
 os.makedirs(dir_model, exist_ok=True)
 
 
-class RenderEveryNSteps(BaseCallback):
-    def __init__(self, env, n: int = 1000, verbose: int = 0):
-        super().__init__(verbose)
-        self.env_ref = env
-        self.n = n
-
-    def _on_step(self) -> bool:
-        if self.n > 0 and self.num_timesteps % self.n == 0:
-            self.env_ref.render()  # chama o render do seu GridFlexEnv
-        return True
-
-
 if __name__ == "__main__":
     base_config = {
         "name_spreadsheet": "sheet_IEEE13Node.xlsx",
@@ -48,7 +36,7 @@ if __name__ == "__main__":
     # Dados completos (os mesmos da planilha)
     reward_weights = {"delta_sigma": 1000.0, "delta_norm": 1000.0, "soc": 1000.0}
     full_start = pd.Timestamp("2012-07-06 12:00")
-    full_end = pd.Timestamp("2012-07-10 06:00")
+    full_end = pd.Timestamp("2012-07-08 06:00")
     dt_minutes = 5
     split_test = 0.7  # 50% para teste
 
@@ -78,7 +66,7 @@ if __name__ == "__main__":
 
     ######## ----------------------- Treinamento ------------------- ################
     model = PPO("MlpPolicy", env_train, verbose=1, n_steps=steps_por_episodio)
-    callback = RenderEveryNSteps(env_train, n=1)  # por exemplo, print a cada 1 steps
+    train_callback = TrainLoggingCallback(env_train,save_dir= dir_model, render_every_n=1,verbose=1)  # por exemplo, print a cada 1 steps
     print(
         f"Iniciando o treinamento do agente RL em {full_start} até {split_timestamp}..."
     )
@@ -86,7 +74,7 @@ if __name__ == "__main__":
     print("warmup_steps       =", warmup_steps)
     print("steps_por_episodio =", steps_por_episodio)
 
-    model.learn(total_timesteps=steps_por_episodio, callback=callback)  #
+    model.learn(total_timesteps=steps_por_episodio, callback=train_callback)  #
     # Salvando o modelo e os índices
     print("Salvando o modelo treinado...")
     model.save(os.path.join(dir_model, "ppo_gridflex"))

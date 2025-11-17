@@ -25,6 +25,9 @@ from .get_general_informations import get_informations
 from .load import construct_lights, construct_loads
 from .powerflow import power_flow_bess
 from .read_spreadsheet import read_file_xlsx
+from stable_baselines3.common.callbacks import BaseCallback
+import os
+
 
 
 @dataclass
@@ -45,6 +48,7 @@ class RewardBreakdown:
 
 
 class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
+
     """Gymnasium environment that wraps the GridFlex framework.
 
     Parameters
@@ -186,6 +190,11 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         self.prev_sigma = 0.0
         self.prev_norm = 0.0
 
+         # Snapshots do último episódio finalizado
+        self.last_episode_indices: Optional[pd.DataFrame] = None
+        self.last_episode_results: Optional[Dict[str, pd.DataFrame]] = None
+        self.last_episode_rewards: Optional[List[RewardBreakdown]] = None
+
     # --------------------------------------------------------------------- #
     # Gym API                                                               #
     # --------------------------------------------------------------------- #
@@ -256,6 +265,13 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
 
         terminated = self.current_idx >= len(self.time_range)
         truncated = False
+
+        if terminated:
+            # Guarda cópias para uso fora (callback, pós-treino, etc.)
+            self.last_episode_indices = self.indices_results()
+            self.last_episode_results = self.episode_results()
+            self.last_episode_rewards = list(self.reward_trace)
+
         info = {
             "timestep": timestep,
             "reward_terms": breakdown.as_dict,
@@ -304,10 +320,11 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         demand_kw = self.demand_history[-1][1]
         soc = ", ".join(f"{val:.3f}" for val in self._soc_array())
         Pbess = self.bess_power_history[-1][2]
-        action = self.action_trace[-1][0]
+        # action = self.action_trace[-1][0]
         print(
             f"[{timestep}] Demand={demand_kw:.2f} kW "
-            f"Action {action:.2f} PBESS={Pbess:.2f} kW "
+            # f"Action {action:.2f} PBESS={Pbess:.2f} kW "
+            f"PBESS={Pbess:.2f} kW "
             f"Sigma={self.latest_sigma:.4f} Norm={self.latest_norm:.4f} "
         )
 
@@ -564,3 +581,91 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
                 "Norm": self.norm_history,
             }
         )
+    
+## Callbacks
+class RenderEveryNSteps(BaseCallback):
+    def __init__(self, env, n: int = 1000, verbose: int = 0):
+        super().__init__(verbose)
+        self.env_ref = env
+        self.n = n
+
+    def _on_step(self) -> bool:
+        if self.n > 0 and self.num_timesteps % self.n == 0:
+            self.env_ref.render()  # chama o render do seu GridFlexEnv
+        return True
+
+# Imprime Log e Salva Resultados a cada episódio
+class TrainLoggingCallback(BaseCallback):
+    """
+    Callback que:
+      - chama env.render() a cada `render_every_n` steps de treino;
+      - ao final de cada episódio, salva:
+          * índices (sigma/norm) via env.indices_results()
+          * resultados de potência/carga via env.episode_results()
+          * termos de recompensa via env.reward_trace
+    """
+
+    def __init__(self, env, save_dir: str, render_every_n: int = 0, verbose: int = 0):
+        super().__init__(verbose)
+        self.env_ref = env                # <- aqui guardamos o env passado
+        self.save_dir = save_dir
+        self.render_every_n = render_every_n
+        self.episode_idx = 0
+
+        os.makedirs(self.save_dir, exist_ok=True)
+
+    def _on_step(self) -> bool:
+        # 1) Render periódico
+        if self.render_every_n > 0 and self.num_timesteps % self.render_every_n == 0:
+            self.env_ref.render()
+
+        # 2) Salvamento no fim de episódio
+        dones = self.locals.get("dones")
+        if dones is not None and dones[0]:
+            # Usa os snapshots preenchidos em step() quando terminated=True
+            if (
+                self.env_ref.last_episode_results is None
+                or self.env_ref.last_episode_indices is None
+                or self.env_ref.last_episode_rewards is None
+            ):
+                if self.verbose > 0:
+                    print("[TrainLoggingCallback] Aviso: last_episode_* está None.")
+                return True
+
+            results = self.env_ref.last_episode_results
+            indices_df = self.env_ref.last_episode_indices
+            rewards_df = pd.DataFrame(
+                [r.as_dict for r in self.env_ref.last_episode_rewards]
+            )
+
+
+            # salva índices
+            indices_df.to_csv(
+                os.path.join(self.save_dir, "indices_train.csv"),
+                index=False,
+            )
+
+            # salva demand e bess (pode adicionar outros se quiser)
+            results["demand"].to_csv(
+                os.path.join(self.save_dir, "demand_train.csv"),
+                index=False,
+            )
+            results["bess"].to_csv(
+                os.path.join(self.save_dir, "bess_train.csv"),
+                index=False,
+            )
+
+            # salva termos de recompensa
+            rewards_df.to_csv(
+                os.path.join(self.save_dir, "rewards_train.csv"),
+                index=False,
+            )
+
+            if self.verbose > 0:
+                print(
+                    f"[TrainLoggingCallback] Episódio {self.episode_idx} salvo em {self.save_dir}"
+                )
+
+            self.episode_idx += 1
+
+        return True
