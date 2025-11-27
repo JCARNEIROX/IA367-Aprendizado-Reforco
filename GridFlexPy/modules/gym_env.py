@@ -27,6 +27,7 @@ from .powerflow import power_flow_bess
 from .read_spreadsheet import read_file_xlsx
 from stable_baselines3.common.callbacks import BaseCallback
 import os
+from scipy.ndimage import gaussian_filter1d
 
 
 
@@ -323,9 +324,10 @@ class GridFlexEnv(gym.Env[np.ndarray, np.ndarray]):
         # action = self.action_trace[-1][0]
         print(
             f"[{timestep}] Demand={demand_kw:.2f} kW "
-            # f"Action {action:.2f} PBESS={Pbess:.2f} kW "
-            f"PBESS={Pbess:.2f} kW "
+            f"PBESS={Pbess:.2f} kW SoC=[{soc}] "
             f"Sigma={self.latest_sigma:.4f} Norm={self.latest_norm:.4f} "
+            # f"DeltaSigma/DeltaNorm={delta_sigma/delta_norm:.4f} soc_penalty={soc_violation:.4f}"
+            
         )
 
     # --------------------------------------------------------------------- #
@@ -612,8 +614,6 @@ class TrainLoggingCallback(BaseCallback):
         self.render_every_n = render_every_n
         self.episode_idx = 0
 
-        os.makedirs(self.save_dir, exist_ok=True)
-
     def _on_step(self) -> bool:
         # 1) Render periódico
         if self.render_every_n > 0 and self.num_timesteps % self.render_every_n == 0:
@@ -641,23 +641,23 @@ class TrainLoggingCallback(BaseCallback):
 
             # salva índices
             indices_df.to_csv(
-                os.path.join(self.save_dir, "indices_train.csv"),
+                os.path.join(self.save_dir + "models/", "indices_train.csv"),
                 index=False,
             )
 
             # salva demand e bess (pode adicionar outros se quiser)
             results["demand"].to_csv(
-                os.path.join(self.save_dir, "demand_train.csv"),
+                os.path.join(self.save_dir + "/demand/", "demand_train.csv"),
                 index=False,
             )
             results["bess"].to_csv(
-                os.path.join(self.save_dir, "bess_train.csv"),
+                os.path.join(self.save_dir + "/bess/", "bess_train.csv"),
                 index=False,
             )
 
             # salva termos de recompensa
             rewards_df.to_csv(
-                os.path.join(self.save_dir, "rewards_train.csv"),
+                os.path.join(self.save_dir + "/models/", "rewards_train.csv"),
                 index=False,
             )
 
